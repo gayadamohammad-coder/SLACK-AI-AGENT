@@ -1,6 +1,3 @@
-databases:
-  - name: slack-agent-db
-    plan: free
 
 services:
   - type: web
