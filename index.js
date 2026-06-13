@@ -10,6 +10,20 @@ import axios from 'axios';
 import { initDatabase, saveMemberAnalysis, markAsSentToSlack, closeDatabase } from './db.js'
 
 dotenv.config();
+const requiredEnvVars = [
+    'OPENAI_API_KEY',
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'SLACK_SIGNING_SECRET',
+    'DATABASE_URL'
+];
+
+for (const envVar of requiredEnvVars) {
+    if (!process.env[envVar]) {
+        console.error(`[ERROR] Missing environment variable: ${envVar}`);
+        process.exit(1);
+    }
+}
 
 const log = {
     info: (msg, ...args) => console.log(`[INFO] ${msg}`, ...args),
@@ -28,7 +42,7 @@ class SlackAIAgent {
         });
         this.webClient = new WebClient(process.env.SLACK_BOT_TOKEN);
         this.openai = new ChatOpenAI({
-            model: "gpt-4",
+            model: "gpt-4o-mini",
             temperature: 0.3,
             apiKey: process.env.OPENAI_API_KEY
         });
@@ -131,13 +145,28 @@ class SlackAIAgent {
             const analysis = await this.analyzeWithAI(memberInfo, researchData);
             log.info(`Saving analysis to database for ${memberInfo.name}`);
             analysisId = await saveMemberAnalysis(memberInfo, analysis, researchData);
-            await this.postAnalysisToChannel(memberInfo, analysis, researchData);
+            try {
+    await this.postAnalysisToChannel(memberInfo, analysis, researchData);
+
+    if (analysisId) {
+        await markAsSentToSlack(analysisId);
+    }
+} catch (slackError) {
+    log.error('Slack posting failed:', slackError.message);
+
+    if (analysisId) {
+        log.info(`Analysis ${analysisId} saved to database but not sent to Slack`);
+    }
+}
 
             if (analysisId) {
                 await markAsSentToSlack(analysisId);
             }
         } catch (error) {
-            log.error(`Error processing ${memberInfo.name}:`, error.message);
+           log.error(
+               `Error processing ${memberInfo.name}:`,
+                  error.response?.data || error.message
+                    )
             if (analysisId) {
                 log.info(`Analysis ${analysisId} saved to database but not sent to Slack due to error`);
             }
